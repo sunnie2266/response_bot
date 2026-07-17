@@ -2,7 +2,7 @@ from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools.tool_context import ToolContext
 from response_bot.mock import FAKE_INCIDENT, SEVERITY_BANDS
 
-AUTO_APPROVE = True
+AUTO_APPROVE = False
 
 def seed_incident(callback_context: CallbackContext):
     state = callback_context.state
@@ -42,8 +42,20 @@ def execute_destructive(action: str, rationale: str, tool_context: ToolContext) 
         action: one of 'isolate_host', 'block_ip', 'disable_user'.
         rationale: one sentence explaining why.
     """
-    note = " [approved]" if AUTO_APPROVE else " [BLOCKED - needs human approval]"
-    return _record(action, rationale, tool_context, note=note)
+    if not AUTO_APPROVE:
+        # gate CLOSED: do not execute; record as pending instead
+        history = tool_context.state.get("actions_taken", [])
+        history.append({
+            "action": action,
+            "rationale": rationale,
+            "result": "[BLOCKED - awaiting human approval, NOT executed]",
+        })
+        tool_context.state["actions_taken"] = history
+        tool_context.actions.skip_summarization = True
+        return {"status": "blocked", "observation": "awaiting human approval"}
+
+    # gate OPEN: execute normally
+    return _record(action, rationale, tool_context, note=" [approved]")
 
 
 def execute_safe(action: str, rationale: str, tool_context: ToolContext) -> dict:
